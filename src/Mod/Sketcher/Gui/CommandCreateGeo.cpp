@@ -33,6 +33,8 @@
 #include <Gui/CommandT.h>
 #include <Gui/Document.h>
 #include <Gui/MainWindow.h>
+#include <Gui/Notifications.h>
+#include <Gui/Selection/Selection.h>
 #include <Gui/Selection/SelectionFilter.h>
 #include <Gui/View3DInventor.h>
 #include <Gui/View3DInventorViewer.h>
@@ -41,6 +43,8 @@
 #include <Mod/Part/App/Geometry2d.h>
 #include <Mod/Sketcher/App/Constraint.h>
 #include <Mod/Sketcher/App/SketchObject.h>
+#include <Base/Vector3D.h>
+#include <Precision.hxx>
 
 #include "CircleEllipseConstructionMethod.h"
 #include "GeometryCreationMode.h"
@@ -1597,6 +1601,7 @@ public:
 
         addCommand("Sketcher_Trimming");
         addCommand("Sketcher_Split");
+        addCommand("Sketcher_SplitAtPoint");
         addCommand("Sketcher_Extend");
     }
 
@@ -1696,6 +1701,156 @@ void CmdSketcherSplit::activated(int iMsg)
 }
 
 bool CmdSketcherSplit::isActive()
+{
+    return isCommandActive(getActiveGuiDocument());
+}
+
+// Split edge at point =======================================================
+
+DEF_STD_CMD_A(CmdSketcherSplitAtPoint)
+
+CmdSketcherSplitAtPoint::CmdSketcherSplitAtPoint()
+    : Command("Sketcher_SplitAtPoint")
+{
+    sAppModule = "Sketcher";
+    sGroup = "Sketcher";
+    sMenuText = QT_TR_NOOP("Split Edge at Point");
+    sToolTipText = QT_TR_NOOP("Splits an edge at a selected vertex or point");
+    sWhatsThis = "Sketcher_SplitAtPoint";
+    sStatusTip = sToolTipText;
+    sPixmap = "Sketcher_Split";
+    eType = ForEdit;
+}
+
+void CmdSketcherSplitAtPoint::activated(int iMsg)
+{
+    Q_UNUSED(iMsg);
+
+    Gui::Document* doc = getActiveGuiDocument();
+    if (!isCommandActive(doc)) {
+        return;
+    }
+
+    std::vector<Gui::SelectionObject> selection = Gui::Selection().getSelectionEx(
+        doc->getDocument()->getName(), Sketcher::SketchObject::getClassTypeId());
+
+    if (selection.size() != 1) {
+        if (!selection.empty()) {
+            auto* sketch = static_cast<Sketcher::SketchObject*>(selection.front().getObject());
+            Gui::NotifyUserError(sketch,
+                                 QT_TRANSLATE_NOOP("Notifications", "Invalid selection"),
+                                 QT_TRANSLATE_NOOP("Notifications",
+                                                   "Select exactly one edge and one point."));
+        }
+        return;
+    }
+
+    auto& selected = selection.front();
+    auto* sketch = static_cast<Sketcher::SketchObject*>(selected.getObject());
+
+    const auto& subNames = selected.getSubNames();
+    if (subNames.size() < 2) {
+        Gui::NotifyUserError(sketch,
+                             QT_TRANSLATE_NOOP("Notifications", "Invalid selection"),
+                             QT_TRANSLATE_NOOP("Notifications",
+                                               "Select exactly one edge and one point."));
+        return;
+    }
+
+    int edgeGeoId = Sketcher::GeoEnum::GeoUndef;
+    Base::Vector3d splitPoint;
+    bool hasSplitPoint = false;
+
+    for (const auto& name : subNames) {
+        if (name.size() > 4 && name.substr(0, 4) == "Edge") {
+            edgeGeoId = std::atoi(name.substr(4, 4000).c_str()) - 1;
+        }
+        else if (name.size() > 6 && name.substr(0, 6) == "Vertex") {
+            int vertexId = std::atoi(name.substr(6, 4000).c_str()) - 1;
+            int geoId = Sketcher::GeoEnum::GeoUndef;
+            Sketcher::PointPos pos = Sketcher::PointPos::none;
+            sketch->getGeoVertexIndex(vertexId, geoId, pos);
+
+            const Part::Geometry* geometry = sketch->getGeometry(geoId);
+            if (!geometry) {
+                continue;
+            }
+
+            if (geometry->is<Part::GeomPoint>()) {
+                const auto* point = static_cast<const Part::GeomPoint*>(geometry);
+                splitPoint = point->getPoint();
+                hasSplitPoint = true;
+            }
+            else if (pos != Sketcher::PointPos::none) {
+                splitPoint = sketch->getPoint(geoId, pos);
+                hasSplitPoint = true;
+                if (edgeGeoId == Sketcher::GeoEnum::GeoUndef) {
+                    edgeGeoId = geoId;
+                }
+            }
+        }
+    }
+
+    if (edgeGeoId == Sketcher::GeoEnum::GeoUndef || !hasSplitPoint) {
+        Gui::NotifyUserError(sketch,
+                             QT_TRANSLATE_NOOP("Notifications", "Invalid selection"),
+                             QT_TRANSLATE_NOOP("Notifications",
+                                               "Select exactly one edge and one point."));
+        return;
+    }
+
+    const Part::Geometry* geometry = sketch->getGeometry(edgeGeoId);
+    auto* curve = dynamic_cast<const Part::GeomCurve*>(geometry);
+    if (!curve) {
+        Gui::NotifyUserError(sketch,
+                             QT_TRANSLATE_NOOP("Notifications", "Invalid selection"),
+                             QT_TRANSLATE_NOOP("Notifications",
+                                               "The selected edge cannot be split."));
+        return;
+    }
+
+    const double tolerance = Precision::Confusion() * 100.0;
+    Base::Vector3d start = sketch->getPoint(edgeGeoId, Sketcher::PointPos::start);
+    Base::Vector3d end = sketch->getPoint(edgeGeoId, Sketcher::PointPos::end);
+    if ((splitPoint - start).Length() < tolerance || (splitPoint - end).Length() < tolerance) {
+        Gui::NotifyUserError(sketch,
+                             QT_TRANSLATE_NOOP("Notifications", "Invalid selection"),
+                             QT_TRANSLATE_NOOP("Notifications",
+                                               "The selected point lies on an endpoint."));
+        return;
+    }
+
+    double splitParam = 0.0;
+    curve->closestParameter(splitPoint, splitParam);
+    Base::Vector3d projected = curve->value(splitParam);
+    if ((projected - splitPoint).Length() > tolerance) {
+        Gui::NotifyUserError(sketch,
+                             QT_TRANSLATE_NOOP("Notifications", "Invalid selection"),
+                             QT_TRANSLATE_NOOP("Notifications",
+                                               "The selected point is not on the edge."));
+        return;
+    }
+
+    try {
+        Gui::Command::openCommand(QT_TRANSLATE_NOOP("Command", "Split edge at point"));
+        Gui::cmdAppObjectArgs(sketch,
+                              "split(%d,App.Vector(%f,%f,%f))",
+                              edgeGeoId,
+                              projected.x,
+                              projected.y,
+                              projected.z);
+        Gui::Command::commitCommand();
+        tryAutoRecompute(sketch);
+    }
+    catch (const Base::Exception& e) {
+        Gui::NotifyUserError(sketch,
+                             QT_TRANSLATE_NOOP("Notifications", "Error"),
+                             e.what());
+        Gui::Command::abortCommand();
+    }
+}
+
+bool CmdSketcherSplitAtPoint::isActive()
 {
     return isCommandActive(getActiveGuiDocument());
 }
@@ -1901,6 +2056,7 @@ void CreateSketcherCommandsCreateGeo()
     rcCmdMgr.addCommand(new CmdSketcherTrimming());
     rcCmdMgr.addCommand(new CmdSketcherExtend());
     rcCmdMgr.addCommand(new CmdSketcherSplit());
+    rcCmdMgr.addCommand(new CmdSketcherSplitAtPoint());
     rcCmdMgr.addCommand(new CmdSketcherProjection());
     rcCmdMgr.addCommand(new CmdSketcherIntersection());
     rcCmdMgr.addCommand(new CmdSketcherCarbonCopy());
