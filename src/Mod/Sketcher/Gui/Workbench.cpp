@@ -421,7 +421,8 @@ inline void SketcherAddWorkspaceCurveEdition<Gui::MenuItem>(Gui::MenuItem& geom)
 {
     geom << "Sketcher_Trimming"
          << "Sketcher_Extend"
-         << "Sketcher_Split";
+         << "Sketcher_Split"
+         << "Sketcher_SplitAtPoint";
 }
 
 template<>

@@ -106,6 +106,7 @@ View these pages for more information:
 - [Workbenches](https://wiki.freecad.org/Workbenches)
 - [Scripting](https://wiki.freecad.org/Power_users_hub)
 - [Developers Handbook](https://freecad.github.io/DevelopersHandbook/)
+- The Sketcher workbench includes a "Split Edge at Point" tool that lets you divide a curve exactly where an existing vertex or reference point is located, preserving downstream constraints.
 
 The [FreeCAD forum](https://forum.freecad.org) is a great place
 to find help and solve specific problems when learning to use FreeCAD.
