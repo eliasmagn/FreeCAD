@@ -3698,6 +3698,13 @@ bool SketchObject::deriveConstraintsForPieces(const int oldId,
 
             break;
         }
+        case Angle: {
+            if (geo->is<Part::GeomLineSegment>()) {
+                transferToAll = true;
+            }
+
+            break;
+        }
         case Distance:
         case DistanceX:
         case DistanceY:

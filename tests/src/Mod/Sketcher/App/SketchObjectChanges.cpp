@@ -2,6 +2,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+#include <set>
+
 #include <FCConfig.h>
 
 #include <App/Application.h>
@@ -32,6 +35,51 @@ TEST_F(SketchObjectTest, testSplitLineSegment)
     // Expect the resultant curves are line segments and shape is conserved
     int numberOfCoincidentConstraints = countConstraintsOfType(getObject(), Sketcher::Coincident);
     EXPECT_EQ(numberOfCoincidentConstraints, 1);
+}
+
+TEST_F(SketchObjectTest, testSplitLineSegmentKeepsAngleConstraint)
+{
+    // Arrange
+    Base::Vector3d start {0.0, 0.0, 0.0};
+    Base::Vector3d end {4.0, 3.0, 0.0};
+    Part::GeomLineSegment lineSeg;
+    lineSeg.setPoints(start, end);
+    const int geoId = getObject()->addGeometry(&lineSeg);
+
+    auto* angleConstraint = new Sketcher::Constraint();  // ownership transferred to the sketch
+    angleConstraint->Type = Sketcher::ConstraintType::Angle;
+    angleConstraint->First = geoId;
+    angleConstraint->FirstPos = Sketcher::PointPos::none;
+    angleConstraint->setValue(std::atan2(end.y - start.y, end.x - start.x));
+    getObject()->addConstraint(angleConstraint);
+
+    Base::Vector3d splitPoint = getPointAtNormalizedParameter(lineSeg, 0.5);
+
+    // Act
+    int result = getObject()->split(geoId, splitPoint);
+
+    // Assert
+    EXPECT_EQ(result, 0);
+    EXPECT_EQ(countConstraintsOfType(getObject(), Sketcher::ConstraintType::Angle), 2);
+
+    const auto& constraints = getObject()->Constraints.getValues();
+    std::set<int> angleGeoIds;
+    for (const auto* constraint : constraints) {
+        if (constraint->Type != Sketcher::ConstraintType::Angle) {
+            continue;
+        }
+
+        for (size_t i = 0; i < constraint->getElementsSize(); ++i) {
+            const auto element = constraint->getElement(i);
+            if (element.GeoId >= 0) {
+                angleGeoIds.insert(element.GeoId);
+            }
+        }
+    }
+
+    EXPECT_EQ(angleGeoIds.size(), 2);
+    EXPECT_TRUE(angleGeoIds.contains(geoId));
+    EXPECT_TRUE(angleGeoIds.contains(geoId + 1));
 }
 
 TEST_F(SketchObjectTest, testSplitCircle)

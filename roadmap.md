@@ -3,6 +3,7 @@
 ## Completed
 
 - 2025-10-05 — Delivered the Sketcher "Split Edge at Point" tool, enabling constraint-safe curve subdivision directly at existing vertices or reference points.
+- 2025-10-06 — Ensured split operations retain angle constraints on resulting segments and added regression coverage.
 
 ## In Progress
 
